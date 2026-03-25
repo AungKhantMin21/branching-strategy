@@ -1,6 +1,2 @@
 hello world!
 
-========
-Version release 1.0.0 
-hot fix made on 24 mar.
-Version updated to 1.0.1

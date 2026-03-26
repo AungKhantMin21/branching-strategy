@@ -1,0 +1,2 @@
+payment slip
+total -1

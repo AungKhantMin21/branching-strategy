@@ -220,49 +220,79 @@ git push origin --delete hotfix/1.2.1-payment-crash
 
 ## 5. Rollback Procedures
 
-### Option A — Revert last release (recommended)
+All protected branches (`main`, `uat`, `develop`) cannot be pushed to directly.
+Rollback uses a `hotfix/*` branch as the vehicle — revert in the hotfix branch,
+then PR it into the target branch.
 
-Safe, non-destructive. Creates a new revert commit — no history lost.
-
-```bash
-git log --oneline main | head -10
-git checkout main
-git revert -m 1 <merge-commit-sha>
-git push origin main
-# → CI/CD redeploys main → Production restored
+### How it works
+```
+hotfix/rollback-* branch
+    │
+    ├── revert commits made here
+    │
+    ├── PR → uat   (rebase)   → tag uat-X.Y.Z-rollback
+    ├── PR → main  (rebase)   → tag vX.Y.Z-rollback  
+    └── PR → develop (rebase)
 ```
 
-### Option B — Redeploy a previous tag (fastest)
+> Rule: always start from `uat`, let it flow to `main` via PR,
+> then handle `develop` separately. Never start from `main`.
 
-Use when you need to jump back to a known-good version immediately.
+---
 
+### Workflow
+
+Use when a bad release is live on production. Rolls back both `uat` and `main`.
 ```bash
-git tag --sort=-version:refname | head -10
-git checkout v1.1.0
-git checkout -b hotfix/emergency-rollback
-git push origin hotfix/emergency-rollback
-# Follow the hotfix flow: UAT verify → main → uat → develop
+# Step 1 — create rollback branch from uat
+git checkout uat && git pull origin uat
+git checkout -b hotfix/rollback-vX.Y.Z
+
+# Step 2 — 
+# Option A) Revert using tag range
+git revert goodVersion..badVersion
+# e.g. git revert v1.0..v1.1
+
+# Option B) Revert using merge commit
+git revert -m 1 <merge-commit-hash>
+
+# Step 3 — push the hotfix branch
+git push origin hotfix/rollback-vX.Y.Z
 ```
-
-### Option C — Rollback UAT only
-
-Production is fine, but UAT needs to revert.
-
 ```bash
-# Retrigger the previous uat tag pipeline, or:
-git checkout uat
-git revert -m 1 <bad-merge-sha>
-git push origin uat
+# Step 4 — PR: hotfix/rollback-vX.Y.Z → uat  (rebase)
+# After merge, tag uat:
+git checkout uat && git pull origin uat
+git tag -a uat-X.Y.Z-rollback -m "Rollback to X.Y.Z state"
+git push origin uat --tags
+# → CI/CD redeploys UAT
 ```
+```bash
+# Step 5 — PR: uat → main  (rebase)
+# After merge, tag main:
+git checkout main && git pull origin main
+git tag -a vX.Y.Z-rollback -m "Rollback to X.Y.Z state"
+git push origin main --tags
+# → CI/CD redeploys Production
+```
+```bash
+# Step 6 — sync develop separately
+git checkout develop && git pull origin develop
+git checkout -b hotfix/rollback-develop-vX.Y.Z
+git revert goodVersion..badVersion --no-edit
+git push origin hotfix/rollback-develop-vX.Y.Z
 
-### Decision table
-
-| Scenario | Use |
-|---|---|
-| Bad release on Production | Option A — `git revert -m 1` |
-| Need instant prod rollback | Option B — redeploy previous tag |
-| UAT broken only | Option C — revert on uat |
-
+# PR: hotfix/rollback-develop-vX.Y.Z → develop  (rebase)
+# After merge:
+git checkout develop && git pull origin develop
+```
+```bash
+# Step 7 — clean up hotfix branches
+git branch -d hotfix/rollback-vX.Y.Z
+git push origin --delete hotfix/rollback-vX.Y.Z
+git branch -d hotfix/rollback-develop-vX.Y.Z
+git push origin --delete hotfix/rollback-develop-vX.Y.Z
+```
 ---
 
 ## 6. Tag Convention
